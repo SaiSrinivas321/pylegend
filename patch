@@ -1,1721 +1,242 @@
-Subject: [PATCH] sync master
----
-Index: tests/core/language/shared/primitives/test_decimal.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/tests/core/language/shared/primitives/test_decimal.py b/tests/core/language/shared/primitives/test_decimal.py
---- a/tests/core/language/shared/primitives/test_decimal.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/tests/core/language/shared/primitives/test_decimal.py	(date 1775119452787)
-@@ -335,19 +335,13 @@
- 
-         with pytest.raises(ValueError) as v:
-             self.__generate_sql_string_no_decimal_assert(lambda x: x.get_decimal("col2").in_list([]))
--        assert v.value.args[0] == "in_list parameter should be a non-empty list of number values."
-+        assert v.value.args[0] == "in_list parameter should be a non-empty list of primitive values."
- 
-         with pytest.raises(ValueError) as v:
-             self.__generate_sql_string_no_decimal_assert(
-                 lambda x: x.get_decimal("col2").in_list("not_a_list")  # type: ignore[arg-type]
-             )
--        assert v.value.args[0] == "in_list parameter should be a non-empty list of number values."
--
--        with pytest.raises(TypeError) as t:
--            self.__generate_sql_string_no_decimal_assert(
--                lambda x: x.get_decimal("col2").in_list(["a", "b"])  # type: ignore[list-item]
--            )
--        assert t.value.args[0].startswith("in_list list element should be a int/float/decimal.Decimal")
-+        assert v.value.args[0] == "in_list parameter should be a non-empty list of primitive values."
- 
-     def __generate_sql_string(self, f: PyLegendCallable[[TestTdsRow], PyLegendPrimitive]) -> str:
-         ret = f(self.tds_row)
-Index: tests/core/language/shared/primitives/test_date.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/tests/core/language/shared/primitives/test_date.py b/tests/core/language/shared/primitives/test_date.py
---- a/tests/core/language/shared/primitives/test_date.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/tests/core/language/shared/primitives/test_date.py	(date 1775119403621)
-@@ -536,15 +536,11 @@
- 
-         with pytest.raises(ValueError) as v:
-             self.__generate_sql_string(lambda x: x.get_date("col2").in_list([]))
--        assert v.value.args[0] == "in_list parameter should be a non-empty list of date values."
-+        assert v.value.args[0] == "in_list parameter should be a non-empty list of primitive values."
- 
-         with pytest.raises(ValueError) as v:
-             self.__generate_sql_string(lambda x: x.get_date("col2").in_list("not_a_list"))
--        assert v.value.args[0] == "in_list parameter should be a non-empty list of date values."
--
--        with pytest.raises(TypeError) as t:
--            self.__generate_sql_string(lambda x: x.get_date("col2").in_list([1, 2]))
--        assert t.value.args[0].startswith("in_list list element should be a datetime.date/datetime.datetime")
-+        assert v.value.args[0] == "in_list parameter should be a non-empty list of primitive values."
- 
-     def test_e2e_date_adjust_expr(
-             self,
-@@ -691,6 +687,45 @@
-             }]
-         }
- 
-+    def test_e2e_most_recent_and_previous_day_of_week(
-+            self,
-+            legend_test_server: PyLegendDict[str, PyLegendUnion[int,]]
-+    ) -> None:
-+        frame: LegendQLApiTdsFrame = simple_relation_trade_service_frame_legendql_api(
-+            legend_test_server["engine_port"]
-+        )
-+
-+        frame = frame.select([
-+            "Settlement Date Time"
-+        ]).sort(lambda r: r["Settlement Date Time"].descending()).limit(1)
-+
-+        frame = frame.extend([
-+            ("most_recent_monday", lambda r: most_recent_day_of_week("Monday")),
-+            ("most_recent_friday", lambda r: most_recent_day_of_week("Friday")),
-+            ("most_recent_friday_first_day_of_month",
-+             lambda r: most_recent_day_of_week("Friday").first_day_of_month()),
-+            ("previous_monday", lambda r: previous_day_of_week("Monday")),
-+            ("previous_saturday", lambda r: previous_day_of_week("Saturday")),
-+            ("previous_saturday_first_day_of_month",
-+             lambda r: previous_day_of_week("Saturday").first_day_of_month()),
-+        ])
-+
-+        res = frame.execute_frame_to_string()
-+        result = json.loads(res)["result"]
-+        assert result["columns"] == [
-+            "Settlement Date Time",
-+            "most_recent_monday",
-+            "most_recent_friday",
-+            "most_recent_friday_first_day_of_month",
-+            "previous_monday",
-+            "previous_saturday",
-+            "previous_saturday_first_day_of_month",
-+        ]
-+        assert len(result["rows"]) == 1
-+        values = result["rows"][0]["values"]
-+        assert values[0] == "2014-12-05T21:00:00.000000000+0000"
-+        assert all(v is not None for v in values)
-+
-     def __generate_sql_string(self, f) -> str:  # type: ignore
-         return self.db_extension.process_expression(
-             f(self.tds_row).to_sql_expression({"t": self.base_query}, self.frame_to_sql_config),
-Index: pylegend/core/language/shared/operations/date_operation_expressions.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/pylegend/core/language/shared/operations/date_operation_expressions.py b/pylegend/core/language/shared/operations/date_operation_expressions.py
---- a/pylegend/core/language/shared/operations/date_operation_expressions.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/pylegend/core/language/shared/operations/date_operation_expressions.py	(date 1775125272831)
-@@ -15,7 +15,6 @@
- from pylegend._typing import (
-     PyLegendSequence,
-     PyLegendDict,
--    PyLegendList,
- )
- from pylegend.core.language.shared.expression import (
-     PyLegendExpressionDateReturn,
-@@ -44,8 +43,6 @@
-     CurrentTimeType,
-     ComparisonExpression,
-     ComparisonOperator,
--    InPredicate,
--    InListExpression,
- )
- from pylegend.core.sql.metamodel_extension import (
-     FirstDayOfYearExpression,
-@@ -105,7 +102,6 @@
-     "PyLegendDateAdjustExpression",
-     "PyLegendDateDiffExpression",
-     "PyLegendDateTimeBucketExpression",
--    "PyLegendDateInListExpression",
-     "PyLegendPreviousDayOfWeekExpression",
-     "PyLegendMostRecentDayOfWeekExpression",
-     "DurationUnit"
-@@ -901,34 +897,6 @@
-         )
- 
- 
--class PyLegendDateInListExpression(PyLegendNaryExpression, PyLegendExpressionBooleanReturn):
--
--    @staticmethod
--    def __to_sql_func(
--            expressions: list[Expression],
--            frame_name_to_base_query_map: PyLegendDict[str, QuerySpecification],
--            config: FrameToSqlConfig
--    ) -> Expression:
--        return InPredicate(
--            value=expressions[0],
--            valueList=InListExpression(values=expressions[1:])
--        )
--
--    @staticmethod
--    def __to_pure_func(op_expr: list[str], config: FrameToPureConfig) -> str:
--        return generate_pure_functional_call("in", [op_expr[0], '[' + ', '.join(op_expr[1:]) + ']'])
--
--    def __init__(self, operands: PyLegendList[PyLegendExpression]) -> None:
--        PyLegendExpressionBooleanReturn.__init__(self)
--        PyLegendNaryExpression.__init__(
--            self,
--            operands,
--            PyLegendDateInListExpression.__to_sql_func,
--            PyLegendDateInListExpression.__to_pure_func,
--            non_nullable=True
--        )
--
--
- class PyLegendMostRecentDayOfWeekExpression(PyLegendUnaryExpression, PyLegendExpressionStrictDateReturn):
- 
-     @staticmethod
-Index: pylegend/core/language/shared/primitives/boolean.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/pylegend/core/language/shared/primitives/boolean.py b/pylegend/core/language/shared/primitives/boolean.py
---- a/pylegend/core/language/shared/primitives/boolean.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/pylegend/core/language/shared/primitives/boolean.py	(date 1775114812887)
-@@ -22,9 +22,11 @@
-     PyLegendExpression,
-     PyLegendExpressionBooleanReturn,
-     PyLegendExpressionStringReturn,
-+    PyLegendExpressionNumberReturn,
-     PyLegendExpressionIntegerReturn,
-     PyLegendExpressionFloatReturn,
-     PyLegendExpressionDecimalReturn,
-+    PyLegendExpressionDateReturn,
-     PyLegendExpressionDateTimeReturn,
-     PyLegendExpressionStrictDateReturn,
- )
-@@ -43,10 +45,12 @@
-     PyLegendBooleanGreaterThanEqualExpression,
-     PyLegendBooleanXorExpression,
-     PyLegendBooleanCaseExpression,
-+    PyLegendNumberCaseExpression,
-     PyLegendIntegerCaseExpression,
-     PyLegendFloatCaseExpression,
-     PyLegendDecimalCaseExpression,
-     PyLegendStringCaseExpression,
-+    PyLegendDateCaseExpression,
-     PyLegendDateTimeCaseExpression,
-     PyLegendStrictDateCaseExpression
- )
-@@ -94,8 +98,8 @@
-             if_false: "PyLegendPrimitiveOrPythonPrimitive",
-     ) -> PyLegendPrimitive:
-         from pylegend.core.language.shared.primitives import (
--            PyLegendString, PyLegendInteger, PyLegendFloat, PyLegendDecimal,
--            PyLegendDateTime, PyLegendStrictDate
-+            PyLegendString, PyLegendNumber, PyLegendInteger, PyLegendFloat, PyLegendDecimal,
-+            PyLegendDate, PyLegendDateTime, PyLegendStrictDate
-         )
- 
-         def resolve_param(param: PyLegendPrimitiveOrPythonPrimitive,
-@@ -132,6 +136,11 @@
-                 and isinstance(false_expr, PyLegendExpressionStrictDateReturn):
-             return PyLegendStrictDate(PyLegendStrictDateCaseExpression(
-                 self.__value, true_expr, false_expr
-+            ))
-+        elif isinstance(true_expr, PyLegendExpressionDateReturn) \
-+                and isinstance(false_expr, PyLegendExpressionDateReturn):
-+            return PyLegendDate(PyLegendDateCaseExpression(
-+                self.__value, true_expr, false_expr
-             ))
-         elif isinstance(true_expr, PyLegendExpressionDecimalReturn) \
-                 and isinstance(false_expr, PyLegendExpressionDecimalReturn):
-@@ -147,6 +156,11 @@
-                 and isinstance(false_expr, PyLegendExpressionIntegerReturn):
-             return PyLegendInteger(PyLegendIntegerCaseExpression(
-                 self.__value, true_expr, false_expr
-+            ))
-+        elif isinstance(true_expr, PyLegendExpressionNumberReturn) \
-+                and isinstance(false_expr, PyLegendExpressionNumberReturn):
-+            return PyLegendNumber(PyLegendNumberCaseExpression(
-+                self.__value, true_expr, false_expr
-             ))
-         else:
-             raise TypeError(
-Index: pylegend/core/language/shared/primitive_collection.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/pylegend/core/language/shared/primitive_collection.py b/pylegend/core/language/shared/primitive_collection.py
---- a/pylegend/core/language/shared/primitive_collection.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/pylegend/core/language/shared/primitive_collection.py	(date 1775114500260)
-@@ -324,8 +324,8 @@
-         separator_expr = convert_literal_to_literal_expression(separator)
-         return PyLegendString(PyLegendJoinStringsExpression(nested_expr, separator_expr))  # type: ignore
- 
--    def join_strings(self) -> "PyLegendString":
--        return self.join(separator=";")
-+    def join_strings(self, separator: str = ";") -> "PyLegendString":
-+        return self.join(separator=separator)
- 
-     def distinct_value(self) -> "PyLegendString":
-         nested_expr = (
-Index: tests/core/language/shared/primitives/test_float.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/tests/core/language/shared/primitives/test_float.py b/tests/core/language/shared/primitives/test_float.py
---- a/tests/core/language/shared/primitives/test_float.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/tests/core/language/shared/primitives/test_float.py	(date 1775119379934)
-@@ -193,19 +193,13 @@
- 
-         with pytest.raises(ValueError) as v:
-             self.__generate_sql_string_no_float_assert(lambda x: x.get_float("col2").in_list([]))
--        assert v.value.args[0] == "in_list parameter should be a non-empty list of number values."
-+        assert v.value.args[0] == "in_list parameter should be a non-empty list of primitive values."
- 
-         with pytest.raises(ValueError) as v:
-             self.__generate_sql_string_no_float_assert(
-                 lambda x: x.get_float("col2").in_list("not_a_list")  # type: ignore[arg-type]
-             )
--        assert v.value.args[0] == "in_list parameter should be a non-empty list of number values."
--
--        with pytest.raises(TypeError) as t:
--            self.__generate_sql_string_no_float_assert(
--                lambda x: x.get_float("col2").in_list(["a", "b"])  # type: ignore[list-item]
--            )
--        assert t.value.args[0].startswith("in_list list element should be a int/float/decimal.Decimal")
-+        assert v.value.args[0] == "in_list parameter should be a non-empty list of primitive values."
- 
-     def __generate_sql_string(self, f: PyLegendCallable[[TestTdsRow], PyLegendPrimitive]) -> str:
-         ret = f(self.tds_row)
-Index: pylegend/core/language/shared/primitives/primitive.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/pylegend/core/language/shared/primitives/primitive.py b/pylegend/core/language/shared/primitives/primitive.py
---- a/pylegend/core/language/shared/primitives/primitive.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/pylegend/core/language/shared/primitives/primitive.py	(date 1775117090909)
-@@ -20,6 +20,7 @@
-     PyLegendSequence,
-     PyLegendDict,
-     PyLegendUnion,
-+    PyLegendList,
-     TYPE_CHECKING,
- )
- from pylegend.core.sql.metamodel import (
-@@ -33,7 +34,8 @@
-     PyLegendPrimitiveNotEqualsExpression,
-     PyLegendIsEmptyExpression,
-     PyLegendIsNotEmptyExpression,
--    PyLegendPrimitiveToStringExpression
-+    PyLegendPrimitiveToStringExpression,
-+    PyLegendInListExpression,
- )
- from pylegend.core.tds.pandas_api.frames.helpers.series_helper import grammar_method
- from pylegend.core.tds.tds_frame import FrameToSqlConfig
-@@ -119,6 +121,23 @@
-     def toString(self) -> "PyLegendString":
-         return self.to_string()
- 
-+    @grammar_method
-+    def in_list(
-+            self,
-+            lst: "PyLegendList[PyLegendUnion[int, float, bool, str, date, datetime, PythonDecimal, PyLegendPrimitive]]"
-+    ) -> "PyLegendBoolean":
-+        if not isinstance(lst, list) or len(lst) == 0:
-+            raise ValueError("in_list parameter should be a non-empty list of primitive values.")
-+        operands: PyLegendList[PyLegendExpression] = [self.value()]
-+        for item in lst:
-+            PyLegendPrimitive.__validate_param_to_be_primitive(item, "in_list list element")
-+            if isinstance(item, (int, float, bool, str, date, datetime, PythonDecimal)):
-+                operands.append(convert_literal_to_literal_expression(item))
-+            else:
-+                operands.append(item.value())
-+        from pylegend.core.language.shared.primitives.boolean import PyLegendBoolean
-+        return PyLegendBoolean(PyLegendInListExpression(operands))
-+
-     @staticmethod
-     def __validate_param_to_be_primitive(
-             param: "PyLegendUnion[int, float, bool, str, date, datetime, PythonDecimal, PyLegendPrimitive]",
-Index: pylegend/core/language/shared/primitives/number.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/pylegend/core/language/shared/primitives/number.py b/pylegend/core/language/shared/primitives/number.py
---- a/pylegend/core/language/shared/primitives/number.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/pylegend/core/language/shared/primitives/number.py	(date 1775125197875)
-@@ -17,7 +17,6 @@
-     PyLegendDict,
-     PyLegendUnion,
-     PyLegendOptional,
--    PyLegendList,
-     TYPE_CHECKING,
- )
- from decimal import Decimal as PythonDecimal
-@@ -65,7 +64,6 @@
-     PyLegendNumberHyperbolicSinExpression,
-     PyLegendNumberHyperbolicCosExpression,
-     PyLegendNumberHyperbolicTanExpression,
--    PyLegendNumberInListExpression,
- )
- from pylegend.core.sql.metamodel import (
-     Expression,
-@@ -365,22 +363,6 @@
-     def tanh(self) -> "PyLegendNumber":
-         return PyLegendNumber(PyLegendNumberHyperbolicTanExpression(self.__value))
- 
--    @grammar_method
--    def in_list(
--            self,
--            lst: PyLegendList[
--                PyLegendUnion[int, float, PythonDecimal, "PyLegendInteger", "PyLegendFloat", "PyLegendDecimal",
--                              "PyLegendNumber"]
--            ]
--    ) -> "PyLegendBoolean":
--        if not isinstance(lst, list) or len(lst) == 0:
--            raise ValueError("in_list parameter should be a non-empty list of number values.")
--        operands = [self.__value]
--        for item in lst:
--            PyLegendNumber.validate_param_to_be_number(item, "in_list list element")
--            operands.append(PyLegendNumber.__convert_to_number_expr(item))
--        return PyLegendBoolean(PyLegendNumberInListExpression(operands))  # type: ignore
--
-     @grammar_method
-     def __round__(self, n: PyLegendOptional[int] = None) -> "PyLegendNumber":
-         return self.round(n)
-Index: tests/core/language/shared/primitives/test_integer.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/tests/core/language/shared/primitives/test_integer.py b/tests/core/language/shared/primitives/test_integer.py
---- a/tests/core/language/shared/primitives/test_integer.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/tests/core/language/shared/primitives/test_integer.py	(date 1775119485633)
-@@ -259,19 +259,13 @@
- 
-         with pytest.raises(ValueError) as v:
-             self.__generate_sql_string_no_integer_assert(lambda x: x.get_integer("col2").in_list([]))
--        assert v.value.args[0] == "in_list parameter should be a non-empty list of number values."
-+        assert v.value.args[0] == "in_list parameter should be a non-empty list of primitive values."
- 
-         with pytest.raises(ValueError) as v:
-             self.__generate_sql_string_no_integer_assert(
-                 lambda x: x.get_integer("col2").in_list("not_a_list")  # type: ignore[arg-type]
-             )
--        assert v.value.args[0] == "in_list parameter should be a non-empty list of number values."
--
--        with pytest.raises(TypeError) as t:
--            self.__generate_sql_string_no_integer_assert(
--                lambda x: x.get_integer("col2").in_list(["a", "b"])  # type: ignore[list-item]
--            )
--        assert t.value.args[0].startswith("in_list list element should be a int/float/decimal.Decimal")
-+        assert v.value.args[0] == "in_list parameter should be a non-empty list of primitive values."
- 
-     def __generate_sql_string(self, f: PyLegendCallable[[TestTdsRow], PyLegendPrimitive]) -> str:
-         ret = f(self.tds_row)
-Index: pylegend/core/language/shared/primitives/date.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/pylegend/core/language/shared/primitives/date.py b/pylegend/core/language/shared/primitives/date.py
---- a/pylegend/core/language/shared/primitives/date.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/pylegend/core/language/shared/primitives/date.py	(date 1775125207384)
-@@ -17,7 +17,6 @@
-     PyLegendSequence,
-     PyLegendDict,
-     PyLegendUnion,
--    PyLegendList,
-     TYPE_CHECKING,
- )
- from pylegend.core.language.shared.primitives.primitive import PyLegendPrimitive
-@@ -59,7 +58,6 @@
-     PyLegendDateGreaterThanEqualExpression,
-     PyLegendDateAdjustExpression,
-     PyLegendDateDiffExpression,
--    PyLegendDateInListExpression,
-     DurationUnit,
- )
- from pylegend.core.sql.metamodel import (
-@@ -260,19 +258,6 @@
-     def firstDayOfWeek(self) -> "PyLegendDate":
-         return self.first_day_of_week()
- 
--    @grammar_method
--    def in_list(
--            self,
--            lst: PyLegendList[PyLegendUnion[date, datetime, "PyLegendStrictDate", "PyLegendDateTime", "PyLegendDate"]]
--    ) -> "PyLegendBoolean":
--        if not isinstance(lst, list) or len(lst) == 0:
--            raise ValueError("in_list parameter should be a non-empty list of date values.")
--        operands = [self.__value]
--        for item in lst:
--            PyLegendDate.validate_param_to_be_date(item, "in_list list element")
--            operands.append(PyLegendDate.__convert_to_date_expr(item))
--        return PyLegendBoolean(PyLegendDateInListExpression(operands))  # type: ignore
--
-     @grammar_method
-     def __lt__(
-             self,
-Index: pylegend/core/language/shared/operations/string_operation_expressions.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/pylegend/core/language/shared/operations/string_operation_expressions.py b/pylegend/core/language/shared/operations/string_operation_expressions.py
---- a/pylegend/core/language/shared/operations/string_operation_expressions.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/pylegend/core/language/shared/operations/string_operation_expressions.py	(date 1775117216945)
-@@ -16,7 +16,6 @@
-     PyLegendSequence,
-     PyLegendDict,
-     PyLegendOptional,
--    PyLegendList,
- )
- from pylegend.core.language.shared.expression import (
-     PyLegendExpressionStringReturn,
-@@ -43,8 +42,6 @@
-     FunctionCall,
-     QualifiedName,
-     IntegerLiteral,
--    InPredicate,
--    InListExpression,
- )
- from pylegend.core.sql.metamodel_extension import (
-     StringLengthExpression,
-@@ -100,7 +97,6 @@
-     "PyLegendStringMatchExpression",
-     "PyLegendStringCoalesceExpression",
-     "PyLegendStringParseDecimalExpression",
--    "PyLegendStringInListExpression",
- ]
- 
- 
-@@ -1257,34 +1253,6 @@
-             PyLegendCurrentUserExpression.__to_pure_func,
-             non_nullable=True
-         )
--
--
--class PyLegendStringInListExpression(PyLegendNaryExpression, PyLegendExpressionBooleanReturn):
--
--    @staticmethod
--    def __to_sql_func(
--            expressions: list[Expression],
--            frame_name_to_base_query_map: PyLegendDict[str, QuerySpecification],
--            config: FrameToSqlConfig
--    ) -> Expression:
--        return InPredicate(
--            value=expressions[0],
--            valueList=InListExpression(values=expressions[1:])
--        )
--
--    @staticmethod
--    def __to_pure_func(op_expr: list[str], config: FrameToPureConfig) -> str:
--        return generate_pure_functional_call("in", [op_expr[0], '[' + ', '.join(op_expr[1:]) + ']'])
--
--    def __init__(self, operands: PyLegendList[PyLegendExpression]) -> None:
--        PyLegendExpressionBooleanReturn.__init__(self)
--        PyLegendNaryExpression.__init__(
--            self,
--            operands,
--            PyLegendStringInListExpression.__to_sql_func,
--            PyLegendStringInListExpression.__to_pure_func,
--            non_nullable=True
--        )
- 
- 
- def _escape_like_param(param: str) -> str:
-Index: pylegend/core/language/shared/primitives/string.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/pylegend/core/language/shared/primitives/string.py b/pylegend/core/language/shared/primitives/string.py
---- a/pylegend/core/language/shared/primitives/string.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/pylegend/core/language/shared/primitives/string.py	(date 1775125187427)
-@@ -17,7 +17,6 @@
-     PyLegendDict,
-     PyLegendUnion,
-     PyLegendOptional,
--    PyLegendList
- )
- from pylegend.core.language.shared.literal_expressions import (
-     PyLegendIntegerLiteralExpression,
-@@ -76,7 +75,6 @@
-     PyLegendStringRepeatStringExpression,
-     PyLegendStringMatchExpression,
-     PyLegendStringCoalesceExpression,
--    PyLegendStringInListExpression
- )
- 
- __all__: PyLegendSequence[str] = [
-@@ -323,16 +321,6 @@
- 
-         return PyLegendString(PyLegendStringCoalesceExpression([self.__value, *other_op]))
- 
--    @grammar_method
--    def in_list(self, lst: PyLegendList[PyLegendUnion[str, "PyLegendString"]]) -> "PyLegendBoolean":
--        if not isinstance(lst, list) or len(lst) == 0:
--            raise ValueError("in_list parameter should be a non-empty list of string values.")
--        operands = [self.__value]
--        for item in lst:
--            PyLegendString.__validate_param_to_be_str_or_str_expr(item, "in_list list element")
--            operands.append(PyLegendStringLiteralExpression(item) if isinstance(item, str) else item.__value)
--        return PyLegendBoolean(PyLegendStringInListExpression(operands))  # type: ignore
--
-     @grammar_method
-     def __add__(self, other: PyLegendUnion[str, "PyLegendString"]) -> "PyLegendString":
-         PyLegendString.__validate_param_to_be_str_or_str_expr(other, "String plus (+) parameter")
-Index: tests/core/language/shared/primitives/test_string.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/tests/core/language/shared/primitives/test_string.py b/tests/core/language/shared/primitives/test_string.py
---- a/tests/core/language/shared/primitives/test_string.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/tests/core/language/shared/primitives/test_string.py	(date 1775119319310)
-@@ -440,15 +440,11 @@
- 
-         with pytest.raises(ValueError) as v:
-             self.__generate_sql_string(lambda x: x.get_string("col2").in_list([]))
--        assert v.value.args[0] == "in_list parameter should be a non-empty list of string values."
-+        assert v.value.args[0] == "in_list parameter should be a non-empty list of primitive values."
- 
-         with pytest.raises(ValueError) as v:
-             self.__generate_sql_string(lambda x: x.get_string("col2").in_list("not_a_list"))
--        assert v.value.args[0] == "in_list parameter should be a non-empty list of string values."
--
--        with pytest.raises(TypeError) as t:
--            self.__generate_sql_string(lambda x: x.get_string("col2").in_list([1, 2]))
--        assert t.value.args[0].startswith("in_list list element should be a str or a string expression")
-+        assert v.value.args[0] == "in_list parameter should be a non-empty list of primitive values."
- 
-     def __generate_sql_string(self, f) -> str:  # type: ignore
-         return self.db_extension.process_expression(
-Index: tests/core/language/shared/primitives/test_boolean.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/tests/core/language/shared/primitives/test_boolean.py b/tests/core/language/shared/primitives/test_boolean.py
---- a/tests/core/language/shared/primitives/test_boolean.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/tests/core/language/shared/primitives/test_boolean.py	(date 1775115053372)
-@@ -237,19 +237,41 @@
-             self.tds_row.get_boolean("col1").case(True, 1.5)
-         assert "case if_true and if_false parameters must be of the same type." in t.value.args[0]
- 
--        with pytest.raises(TypeError) as t:
--            self.tds_row.get_boolean("col1").case(date(2025, 1, 1), datetime(2025, 1, 1, 10, 30, 0))
--        assert "case if_true and if_false parameters must be of the same type." in t.value.args[0]
-+        # date literal with datetime literal -> Date case (mixed date subtypes)
-+        assert self.__generate_sql_string(
-+            lambda x: x.get_boolean("col1").case(date(2025, 1, 1), datetime(2025, 1, 1, 10, 30, 0))
-+        ) == ("CASE\n    WHEN\n        \"root\".col1\n    THEN\n        "
-+              "CAST('2025-01-01' AS DATE)\n    ELSE\n        CAST('2025-01-01T10:30:00' AS TIMESTAMP)\nEND")
- 
-+        # Number col with integer literal (mixed numeric types -> Number case)
-         number_frame = TestTableSpecInputFrame(['test_schema', 'test_table'], [
-             PrimitiveTdsColumn.number_column("num_col"),
-             PrimitiveTdsColumn.boolean_column("bool_col")
-         ])
-         number_row = TestTdsRow.from_tds_frame("t", number_frame)
--        number_expr = number_row.get_number("num_col")
--        with pytest.raises(TypeError) as t:
--            number_row.get_boolean("bool_col").case(number_expr, 0)
--        assert "case if_true and if_false parameters must be of the same type." in t.value.args[0]
-+        number_base_query = number_frame.to_sql_query_object(self.frame_to_sql_config)
-+        result = number_row.get_boolean("bool_col").case(number_row.get_number("num_col"), 0)
-+        assert self.db_extension.process_expression(
-+            result.to_sql_expression({"t": number_base_query}, self.frame_to_sql_config),
-+            config=self.sql_to_string_config
-+        ) == 'CASE\n    WHEN\n        "root".bool_col\n    THEN\n        "root".num_col\n    ELSE\n        0\nEND'
-+
-+        # DateTime col with StrictDate col (mixed date subtypes -> Date case)
-+        date_frame = TestTableSpecInputFrame(['test_schema', 'test_table'], [
-+            PrimitiveTdsColumn.datetime_column("dt_col"),
-+            PrimitiveTdsColumn.strictdate_column("sd_col"),
-+            PrimitiveTdsColumn.boolean_column("bool_col")
-+        ])
-+        date_row = TestTdsRow.from_tds_frame("t", date_frame)
-+        date_base_query = date_frame.to_sql_query_object(self.frame_to_sql_config)
-+        result = date_row.get_boolean("bool_col").case(
-+            date_row.get_datetime("dt_col"), date_row.get_strictdate("sd_col")
-+        )
-+        assert self.db_extension.process_expression(
-+            result.to_sql_expression({"t": date_base_query}, self.frame_to_sql_config),
-+            config=self.sql_to_string_config
-+        ) == ('CASE\n    WHEN\n        "root".bool_col\n    THEN\n'
-+              '        "root".dt_col\n    ELSE\n        "root".sd_col\nEND')
- 
-     def __generate_sql_string(self, f: PyLegendCallable[[TestTdsRow], PyLegendPrimitive]) -> str:
-         return self.db_extension.process_expression(
-Index: pylegend/core/language/shared/operations/boolean_operation_expressions.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/pylegend/core/language/shared/operations/boolean_operation_expressions.py b/pylegend/core/language/shared/operations/boolean_operation_expressions.py
---- a/pylegend/core/language/shared/operations/boolean_operation_expressions.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/pylegend/core/language/shared/operations/boolean_operation_expressions.py	(date 1775114812877)
-@@ -20,9 +20,11 @@
-     PyLegendExpression,
-     PyLegendExpressionBooleanReturn,
-     PyLegendExpressionStringReturn,
-+    PyLegendExpressionNumberReturn,
-     PyLegendExpressionIntegerReturn,
-     PyLegendExpressionFloatReturn,
-     PyLegendExpressionDecimalReturn,
-+    PyLegendExpressionDateReturn,
-     PyLegendExpressionDateTimeReturn,
-     PyLegendExpressionStrictDateReturn,
- )
-@@ -56,9 +58,11 @@
-     "PyLegendBooleanXorExpression",
-     "PyLegendBooleanCaseExpression",
-     "PyLegendStringCaseExpression",
-+    "PyLegendNumberCaseExpression",
-     "PyLegendIntegerCaseExpression",
-     "PyLegendFloatCaseExpression",
-     "PyLegendDecimalCaseExpression",
-+    "PyLegendDateCaseExpression",
-     "PyLegendDateTimeCaseExpression",
-     "PyLegendStrictDateCaseExpression",
- ]
-@@ -330,6 +334,13 @@
-                  if_true: PyLegendExpressionStringReturn, if_false: PyLegendExpressionStringReturn) -> None:
-         PyLegendExpressionStringReturn.__init__(self)
-         PyLegendCaseExpressionBase.__init__(self, condition, if_true, if_false)
-+
-+
-+class PyLegendNumberCaseExpression(PyLegendCaseExpressionBase, PyLegendExpressionNumberReturn):
-+    def __init__(self, condition: PyLegendExpressionBooleanReturn,
-+                 if_true: PyLegendExpressionNumberReturn, if_false: PyLegendExpressionNumberReturn) -> None:
-+        PyLegendExpressionNumberReturn.__init__(self)
-+        PyLegendCaseExpressionBase.__init__(self, condition, if_true, if_false)
- 
- 
- class PyLegendIntegerCaseExpression(PyLegendCaseExpressionBase, PyLegendExpressionIntegerReturn):
-@@ -351,6 +362,13 @@
-                  if_true: PyLegendExpressionDecimalReturn, if_false: PyLegendExpressionDecimalReturn) -> None:
-         PyLegendExpressionDecimalReturn.__init__(self)
-         PyLegendCaseExpressionBase.__init__(self, condition, if_true, if_false)
-+
-+
-+class PyLegendDateCaseExpression(PyLegendCaseExpressionBase, PyLegendExpressionDateReturn):
-+    def __init__(self, condition: PyLegendExpressionBooleanReturn,
-+                 if_true: PyLegendExpressionDateReturn, if_false: PyLegendExpressionDateReturn) -> None:
-+        PyLegendExpressionDateReturn.__init__(self)
-+        PyLegendCaseExpressionBase.__init__(self, condition, if_true, if_false)
- 
- 
- class PyLegendDateTimeCaseExpression(PyLegendCaseExpressionBase, PyLegendExpressionDateTimeReturn):
-Index: tests/core/tds/legacy_api/frames/functions/test_legacy_api_group_by_function.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/tests/core/tds/legacy_api/frames/functions/test_legacy_api_group_by_function.py b/tests/core/tds/legacy_api/frames/functions/test_legacy_api_group_by_function.py
---- a/tests/core/tds/legacy_api/frames/functions/test_legacy_api_group_by_function.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/tests/core/tds/legacy_api/frames/functions/test_legacy_api_group_by_function.py	(date 1775126110495)
-@@ -170,12 +170,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col1 AS "col1",
--                COUNT("root".col2) AS "Count"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col1"'''
-+                "root"."col1" AS "col1",
-+                "root"."Count" AS "Count"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col1 AS "col1",
-+                        COUNT("root".col2) AS "Count"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col1"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -205,17 +211,23 @@
-         expected = '''\
-             SELECT
-                 "root"."col1" AS "col1",
--                COUNT("root"."col2") AS "Count"
--            FROM
--                (
--                    SELECT DISTINCT
--                        "root".col1 AS "col1",
--                        "root".col2 AS "col2"
--                    FROM
--                        test_schema.test_table AS "root"
--                ) AS "root"
--            GROUP BY
--                "root"."col1"'''
-+                "root"."Count" AS "Count"
-+            FROM
-+                (
-+                    SELECT
-+                        "root"."col1" AS "col1",
-+                        COUNT("root"."col2") AS "Count"
-+                    FROM
-+                        (
-+                            SELECT DISTINCT
-+                                "root".col1 AS "col1",
-+                                "root".col2 AS "col2"
-+                            FROM
-+                                test_schema.test_table AS "root"
-+                        ) AS "root"
-+                    GROUP BY
-+                        "col1"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -247,18 +259,24 @@
-         expected = '''\
-             SELECT
-                 "root"."col1" AS "col1",
--                COUNT("root"."col2") AS "Count"
--            FROM
--                (
--                    SELECT
--                        "root".col1 AS "col1",
--                        "root".col2 AS "col2"
--                    FROM
--                        test_schema.test_table AS "root"
--                    LIMIT 10
--                ) AS "root"
--            GROUP BY
--                "root"."col1"'''
-+                "root"."Count" AS "Count"
-+            FROM
-+                (
-+                    SELECT
-+                        "root"."col1" AS "col1",
-+                        COUNT("root"."col2") AS "Count"
-+                    FROM
-+                        (
-+                            SELECT
-+                                "root".col1 AS "col1",
-+                                "root".col2 AS "col2"
-+                            FROM
-+                                test_schema.test_table AS "root"
-+                            LIMIT 10
-+                        ) AS "root"
-+                    GROUP BY
-+                        "col1"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -294,26 +312,32 @@
-         expected = '''\
-             SELECT
-                 "root"."col1" AS "col1",
--                COUNT("root"."Count1") AS "Count2"
--            FROM
--                (
--                    SELECT
--                        "root"."col1" AS "col1",
--                        COUNT("root"."col2") AS "Count1"
--                    FROM
--                        (
--                            SELECT
--                                "root".col1 AS "col1",
--                                "root".col2 AS "col2"
--                            FROM
--                                test_schema.test_table AS "root"
--                            LIMIT 10
--                        ) AS "root"
--                    GROUP BY
--                        "root"."col1"
--                ) AS "root"
--            GROUP BY
--                "root"."col1"'''
-+                "root"."Count2" AS "Count2"
-+            FROM
-+                (
-+                    SELECT
-+                        "root"."col1" AS "col1",
-+                        COUNT("root"."Count1") AS "Count2"
-+                    FROM
-+                        (
-+                            SELECT
-+                                "root"."col1" AS "col1",
-+                                COUNT("root"."col2") AS "Count1"
-+                            FROM
-+                                (
-+                                    SELECT
-+                                        "root".col1 AS "col1",
-+                                        "root".col2 AS "col2"
-+                                    FROM
-+                                        test_schema.test_table AS "root"
-+                                    LIMIT 10
-+                                ) AS "root"
-+                            GROUP BY
-+                                "col1"
-+                        ) AS "root"
-+                    GROUP BY
-+                        "col1"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -352,13 +376,20 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col1 AS "col1",
--                COUNT("root".col2) AS "Count1",
--                COUNT("root".col2) AS "Count2"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col1"'''
-+                "root"."col1" AS "col1",
-+                "root"."Count1" AS "Count1",
-+                "root"."Count2" AS "Count2"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col1 AS "col1",
-+                        COUNT("root".col2) AS "Count1",
-+                        COUNT("root".col2) AS "Count2"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col1"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -387,12 +418,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                COUNT(DISTINCT "root".col1) AS "Cnt"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Cnt" AS "Cnt"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        COUNT(DISTINCT "root".col1) AS "Cnt"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -420,12 +457,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                AVG("root".col1) AS "Average"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Average" AS "Average"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        AVG("root".col1) AS "Average"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -454,12 +497,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                AVG(("root".col1 + 20)) AS "Average"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Average" AS "Average"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        AVG(("root".col1 + 20)) AS "Average"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -487,12 +536,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                (AVG("root".col1) + 2) AS "Average"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Average" AS "Average"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        (AVG("root".col1) + 2) AS "Average"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -520,12 +575,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                MAX("root".col1) AS "Maximum"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Maximum" AS "Maximum"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        MAX("root".col1) AS "Maximum"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -553,12 +614,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                MIN("root".col1) AS "Minimum"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Minimum" AS "Minimum"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        MIN("root".col1) AS "Minimum"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -586,12 +653,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                SUM("root".col1) AS "Sum"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Sum" AS "Sum"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        SUM("root".col1) AS "Sum"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -619,12 +692,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                MAX("root".col1) AS "Maximum"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Maximum" AS "Maximum"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        MAX("root".col1) AS "Maximum"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -652,12 +731,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                MIN("root".col1) AS "Minimum"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Minimum" AS "Minimum"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        MIN("root".col1) AS "Minimum"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -685,12 +770,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                SUM("root".col1) AS "Sum"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Sum" AS "Sum"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        SUM("root".col1) AS "Sum"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -718,12 +809,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                MAX("root".col1) AS "Maximum"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Maximum" AS "Maximum"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        MAX("root".col1) AS "Maximum"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -751,12 +848,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                MIN("root".col1) AS "Minimum"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Minimum" AS "Minimum"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        MIN("root".col1) AS "Minimum"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -784,12 +887,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                SUM("root".col1) AS "Sum"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Sum" AS "Sum"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        SUM("root".col1) AS "Sum"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -823,12 +932,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                STDDEV_SAMP("root".col1) AS "Std Dev Sample"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Std Dev Sample" AS "Std Dev Sample"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        STDDEV_SAMP("root".col1) AS "Std Dev Sample"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -863,12 +978,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                STDDEV_SAMP("root".col1) AS "Std Dev"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Std Dev" AS "Std Dev"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        STDDEV_SAMP("root".col1) AS "Std Dev"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -903,12 +1024,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                STDDEV_POP("root".col1) AS "Std Dev Population"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Std Dev Population" AS "Std Dev Population"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        STDDEV_POP("root".col1) AS "Std Dev Population"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -943,12 +1070,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                VAR_SAMP("root".col1) AS "Variance Sample"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Variance Sample" AS "Variance Sample"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        VAR_SAMP("root".col1) AS "Variance Sample"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -983,12 +1116,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                VAR_SAMP("root".col1) AS "Variance"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Variance" AS "Variance"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        VAR_SAMP("root".col1) AS "Variance"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -1023,12 +1162,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col2 AS "col2",
--                VAR_POP("root".col1) AS "Variance Population"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col2"'''
-+                "root"."col2" AS "col2",
-+                "root"."Variance Population" AS "Variance Population"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col2 AS "col2",
-+                        VAR_POP("root".col1) AS "Variance Population"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col2"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -1057,12 +1202,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col1 AS "col1",
--                MAX("root".col2) AS "Maximum"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col1"'''
-+                "root"."col1" AS "col1",
-+                "root"."Maximum" AS "Maximum"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col1 AS "col1",
-+                        MAX("root".col2) AS "Maximum"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col1"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -1090,12 +1241,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col1 AS "col1",
--                MIN("root".col2) AS "Minimum"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col1"'''
-+                "root"."col1" AS "col1",
-+                "root"."Minimum" AS "Minimum"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col1 AS "col1",
-+                        MIN("root".col2) AS "Minimum"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col1"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -1123,12 +1280,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col1 AS "col1",
--                STRING_AGG("root".col2, ' ') AS "Joined"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col1"'''
-+                "root"."col1" AS "col1",
-+                "root"."Joined" AS "Joined"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col1 AS "col1",
-+                        STRING_AGG("root".col2, ' ') AS "Joined"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col1"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -1156,12 +1319,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col1 AS "col1",
--                MAX("root".col2) AS "Maximum"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col1"'''
-+                "root"."col1" AS "col1",
-+                "root"."Maximum" AS "Maximum"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col1 AS "col1",
-+                        MAX("root".col2) AS "Maximum"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col1"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -1189,12 +1358,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col1 AS "col1",
--                MIN("root".col2) AS "Minimum"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col1"'''
-+                "root"."col1" AS "col1",
-+                "root"."Minimum" AS "Minimum"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col1 AS "col1",
-+                        MIN("root".col2) AS "Minimum"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col1"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -1222,12 +1397,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col1 AS "col1",
--                MAX("root".col2) AS "Maximum"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col1"'''
-+                "root"."col1" AS "col1",
-+                "root"."Maximum" AS "Maximum"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col1 AS "col1",
-+                        MAX("root".col2) AS "Maximum"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col1"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-@@ -1255,12 +1436,18 @@
-         )
-         expected = '''\
-             SELECT
--                "root".col1 AS "col1",
--                MIN("root".col2) AS "Minimum"
--            FROM
--                test_schema.test_table AS "root"
--            GROUP BY
--                "root"."col1"'''
-+                "root"."col1" AS "col1",
-+                "root"."Minimum" AS "Minimum"
-+            FROM
-+                (
-+                    SELECT
-+                        "root".col1 AS "col1",
-+                        MIN("root".col2) AS "Minimum"
-+                    FROM
-+                        test_schema.test_table AS "root"
-+                    GROUP BY
-+                        "col1"
-+                ) AS "root"'''
-         assert frame.to_sql_query(FrameToSqlConfig()) == dedent(expected)
-         assert generate_pure_query_and_compile(frame, FrameToPureConfig(), self.legend_client) == dedent(
-             '''\
-Index: pylegend/core/language/shared/operations/primitive_operation_expressions.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/pylegend/core/language/shared/operations/primitive_operation_expressions.py b/pylegend/core/language/shared/operations/primitive_operation_expressions.py
---- a/pylegend/core/language/shared/operations/primitive_operation_expressions.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/pylegend/core/language/shared/operations/primitive_operation_expressions.py	(date 1775125212604)
-@@ -15,6 +15,7 @@
- from pylegend._typing import (
-     PyLegendSequence,
-     PyLegendDict,
-+    PyLegendList,
- )
- from pylegend.core.language.shared.expression import (
-     PyLegendExpression,
-@@ -23,6 +24,7 @@
- )
- from pylegend.core.language.shared.helpers import generate_pure_functional_call
- from pylegend.core.language.shared.operations.binary_expression import PyLegendBinaryExpression
-+from pylegend.core.language.shared.operations.nary_expression import PyLegendNaryExpression
- from pylegend.core.language.shared.operations.unary_expression import PyLegendUnaryExpression
- from pylegend.core.sql.metamodel import (
-     Expression,
-@@ -32,7 +34,9 @@
-     IsNullPredicate,
-     IsNotNullPredicate,
-     Cast,
--    ColumnType
-+    ColumnType,
-+    InPredicate,
-+    InListExpression,
- )
- from pylegend.core.tds.tds_frame import FrameToSqlConfig
- from pylegend.core.tds.tds_frame import FrameToPureConfig
-@@ -43,7 +47,8 @@
-     "PyLegendPrimitiveNotEqualsExpression",
-     "PyLegendIsEmptyExpression",
-     "PyLegendIsNotEmptyExpression",
--    "PyLegendPrimitiveToStringExpression"
-+    "PyLegendPrimitiveToStringExpression",
-+    "PyLegendInListExpression",
- ]
- 
- 
-@@ -175,3 +180,31 @@
-             non_nullable=True,
-             operand_needs_to_be_non_nullable=True,
-         )
-+
-+
-+class PyLegendInListExpression(PyLegendNaryExpression, PyLegendExpressionBooleanReturn):
-+
-+    @staticmethod
-+    def __to_sql_func(
-+            expressions: list[Expression],
-+            frame_name_to_base_query_map: PyLegendDict[str, QuerySpecification],
-+            config: FrameToSqlConfig
-+    ) -> Expression:
-+        return InPredicate(
-+            value=expressions[0],
-+            valueList=InListExpression(values=expressions[1:])
-+        )
-+
-+    @staticmethod
-+    def __to_pure_func(op_expr: list[str], config: FrameToPureConfig) -> str:
-+        return generate_pure_functional_call("in", [op_expr[0], '[' + ', '.join(op_expr[1:]) + ']'])
-+
-+    def __init__(self, operands: PyLegendList[PyLegendExpression]) -> None:
-+        PyLegendExpressionBooleanReturn.__init__(self)
-+        PyLegendNaryExpression.__init__(
-+            self,
-+            operands,
-+            PyLegendInListExpression.__to_sql_func,
-+            PyLegendInListExpression.__to_pure_func,
-+            non_nullable=True
-+        )
-Index: pylegend/core/tds/legacy_api/frames/functions/legacy_api_group_by_function.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/pylegend/core/tds/legacy_api/frames/functions/legacy_api_group_by_function.py b/pylegend/core/tds/legacy_api/frames/functions/legacy_api_group_by_function.py
---- a/pylegend/core/tds/legacy_api/frames/functions/legacy_api_group_by_function.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/pylegend/core/tds/legacy_api/frames/functions/legacy_api_group_by_function.py	(date 1775118689024)
-@@ -113,10 +113,10 @@
-         new_query.select.selectItems = new_select_items
-         new_query.groupBy = [
-             QualifiedNameReference(QualifiedName([
--                db_extension.quote_identifier("root"), db_extension.quote_identifier(c)
--            ])) for c in self.__grouping_columns
-+                c
-+            ])) for c in columns_to_retain
-         ]
--        return new_query
-+        return create_sub_query(new_query, config, "root")
- 
-     def to_pure(self, config: FrameToPureConfig) -> str:
-         group_strings = []
-Index: pylegend/core/language/shared/operations/number_operation_expressions.py
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/pylegend/core/language/shared/operations/number_operation_expressions.py b/pylegend/core/language/shared/operations/number_operation_expressions.py
---- a/pylegend/core/language/shared/operations/number_operation_expressions.py	(revision 5e6a184db700ce171f4646004fe9538377b21290)
-+++ b/pylegend/core/language/shared/operations/number_operation_expressions.py	(date 1775125239295)
-@@ -15,16 +15,13 @@
- from pylegend._typing import (
-     PyLegendSequence,
-     PyLegendDict,
--    PyLegendList
- )
- from pylegend.core.language.shared.expression import (
-     PyLegendExpressionNumberReturn,
-     PyLegendExpressionIntegerReturn,
-     PyLegendExpressionBooleanReturn,
--    PyLegendExpression
- )
- from pylegend.core.language.shared.operations.binary_expression import PyLegendBinaryExpression
--from pylegend.core.language.shared.operations.nary_expression import PyLegendNaryExpression
- from pylegend.core.language.shared.operations.unary_expression import PyLegendUnaryExpression
- from pylegend.core.language.shared.helpers import generate_pure_functional_call
- from pylegend.core.tds.tds_frame import FrameToSqlConfig
-@@ -39,8 +36,6 @@
-     NegativeExpression,
-     FunctionCall,
-     QualifiedName,
--    InPredicate,
--    InListExpression,
- )
- from pylegend.core.sql.metamodel_extension import (
-     AbsoluteExpression,
-@@ -99,7 +94,6 @@
-     "PyLegendNumberHyperbolicSinExpression",
-     "PyLegendNumberHyperbolicCosExpression",
-     "PyLegendNumberHyperbolicTanExpression",
--    "PyLegendNumberInListExpression"
- ]
- 
- 
-@@ -1060,31 +1054,3 @@
-             non_nullable=True,
-             operand_needs_to_be_non_nullable=True,
-         )
--
--
--class PyLegendNumberInListExpression(PyLegendNaryExpression, PyLegendExpressionBooleanReturn):
--
--    @staticmethod
--    def __to_sql_func(
--            expressions: list[Expression],
--            frame_name_to_base_query_map: PyLegendDict[str, QuerySpecification],
--            config: FrameToSqlConfig
--    ) -> Expression:
--        return InPredicate(
--            value=expressions[0],
--            valueList=InListExpression(values=expressions[1:])
--        )
--
--    @staticmethod
--    def __to_pure_func(op_expr: list[str], config: FrameToPureConfig) -> str:
--        return generate_pure_functional_call("in", [op_expr[0], '[' + ', '.join(op_expr[1:]) + ']'])
--
--    def __init__(self, operands: PyLegendList[PyLegendExpression]) -> None:
--        PyLegendExpressionBooleanReturn.__init__(self)
--        PyLegendNaryExpression.__init__(
--            self,
--            operands,
--            PyLegendNumberInListExpression.__to_sql_func,
--            PyLegendNumberInListExpression.__to_pure_func,
--            non_nullable=True
--        )
+# Copyright 2023 Goldman Sachs
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from datetime import date, datetime
+from pylegend._typing import (
+    PyLegendList,
+    PyLegendSequence,
+    PyLegendTuple,
+)
+from pylegend.core.language.shared.helpers import generate_pure_lambda, escape_column_name
+from pylegend.core.tds.abstract.function_helpers import tds_column_for_primitive
+from pylegend.core.tds.legacy_api.frames.legacy_api_applied_function_tds_frame import LegacyApiAppliedFunction
+from pylegend.core.tds.sql_query_helpers import copy_query, create_sub_query
+from pylegend.core.sql.metamodel import (
+    QuerySpecification,
+    SelectItem,
+    SingleColumn,
+    QualifiedNameReference,
+    QualifiedName
+)
+from pylegend.core.tds.tds_column import TdsColumn
+from pylegend.core.tds.tds_frame import FrameToSqlConfig
+from pylegend.core.tds.tds_frame import FrameToPureConfig
+from pylegend.core.tds.legacy_api.frames.legacy_api_base_tds_frame import LegacyApiBaseTdsFrame
+from pylegend.core.language import (
+    LegacyApiTdsRow,
+    LegacyApiAggregateSpecification,
+    PyLegendPrimitive,
+    create_primitive_collection,
+    convert_literal_to_literal_expression,
+)
+
+
+__all__: PyLegendSequence[str] = [
+    "LegacyApiGroupByFunction"
+]
+
+
+class LegacyApiGroupByFunction(LegacyApiAppliedFunction):
+    __base_frame: LegacyApiBaseTdsFrame
+    __grouping_columns: PyLegendList[str]
+    __aggregations: PyLegendList[LegacyApiAggregateSpecification]
+
+    @classmethod
+    def name(cls) -> str:
+        return "group_by"
+
+    def __init__(
+            self,
+            base_frame: LegacyApiBaseTdsFrame,
+            grouping_columns: PyLegendList[str],
+            aggregations: PyLegendList[LegacyApiAggregateSpecification],
+    ) -> None:
+        self.__base_frame = base_frame
+        self.__grouping_columns = grouping_columns
+        self.__aggregations = aggregations
+
+    def to_sql(self, config: FrameToSqlConfig) -> QuerySpecification:
+        db_extension = config.sql_to_string_generator().get_db_extension()
+        base_query = self.__base_frame.to_sql_query_object(config)
+
+        should_create_sub_query = (len(base_query.groupBy) > 0) or base_query.select.distinct or \
+                                  (base_query.offset is not None) or (base_query.limit is not None)
+
+        columns_to_retain = [db_extension.quote_identifier(x) for x in self.__grouping_columns]
+        if should_create_sub_query:
+            new_query = create_sub_query(base_query, config, "root")
+        else:
+            new_query = copy_query(base_query)
+
+        new_cols_with_index: PyLegendList[PyLegendTuple[int, 'SelectItem']] = []
+        for col in new_query.select.selectItems:
+            if not isinstance(col, SingleColumn):
+                raise ValueError("Group By operation not supported for queries "
+                                 "with columns other than SingleColumn")  # pragma: no cover
+            if col.alias is None:
+                raise ValueError("Group By operation not supported for queries "
+                                 "with SingleColumns with missing alias")  # pragma: no cover
+            if col.alias in columns_to_retain:
+                new_cols_with_index.append((columns_to_retain.index(col.alias), col))
+
+        sorted_grouping_cols = sorted(new_cols_with_index, key=lambda x: x[0])
+        new_select_items: PyLegendList['SelectItem'] = [y[1] for y in sorted_grouping_cols]
+        group_by_aliases = [
+            col.alias for _, col in sorted_grouping_cols if isinstance(col, SingleColumn) and col.alias is not None
+        ]
+
+        tds_row = LegacyApiTdsRow.from_tds_frame("frame", self.__base_frame)
+        for agg in self.__aggregations:
+            map_result = agg.get_map_fn()(tds_row)
+            collection = create_primitive_collection(map_result)
+            agg_result = agg.get_aggregate_fn()(collection)
+
+            if isinstance(agg_result, (bool, int, float, str)):
+                agg_sql_expr = convert_literal_to_literal_expression(agg_result).to_sql_expression(
+                    {"frame": new_query},
+                    config
+                )
+            else:
+                agg_sql_expr = agg_result.to_sql_expression({"frame": new_query}, config)
+
+            new_select_items.append(
+                SingleColumn(alias=db_extension.quote_identifier(agg.get_name()), expression=agg_sql_expr)
+            )
+
+        new_query.select.selectItems = new_select_items
+        new_query.groupBy = [
+            QualifiedNameReference(QualifiedName([alias])) for alias in group_by_aliases
+        ]
+        return create_sub_query(new_query, config, "root")
+
+    def to_pure(self, config: FrameToPureConfig) -> str:
+        group_strings = []
+        for col_name in self.__grouping_columns:
+            group_strings.append(escape_column_name(col_name))
+
+        agg_strings = []
+        tds_row = LegacyApiTdsRow.from_tds_frame("r", self.__base_frame)
+        for agg in self.__aggregations:
+            agg_name = escape_column_name(agg.get_name())
+            map_expr = agg.get_map_fn()(tds_row)
+            collection = create_primitive_collection(map_expr)
+            agg_expr = agg.get_aggregate_fn()(collection)
+            map_expr_string = (map_expr.to_pure_expression(config) if isinstance(map_expr, PyLegendPrimitive) else
+                               convert_literal_to_literal_expression(map_expr).to_pure_expression(config))
+            agg_expr_string = agg_expr.to_pure_expression(config).replace(map_expr_string, "$c")
+            agg_strings.append(f"{agg_name}:{generate_pure_lambda('r', map_expr_string)}:"
+                               f"{generate_pure_lambda('c', agg_expr_string)}")
+
+        return (f"{self.__base_frame.to_pure(config)}{config.separator(1)}" +
+                f"->groupBy({config.separator(2)}"
+                f"~[{', '.join(group_strings)}],{config.separator(2, True)}"
+                f"~[{', '.join(agg_strings)}]{config.separator(1)}"
+                f")")
+
+    def base_frame(self) -> LegacyApiBaseTdsFrame:
+        return self.__base_frame
+
+    def tds_frame_parameters(self) -> PyLegendList["LegacyApiBaseTdsFrame"]:
+        return []
+
+    def calculate_columns(self) -> PyLegendSequence["TdsColumn"]:
+        new_columns = []
+        base_columns = self.__base_frame.columns()
+        for c in self.__grouping_columns:
+            for base_col in base_columns:
+                if base_col.get_name() == c:
+                    new_columns.append(base_col.copy())
+
+        tds_row = LegacyApiTdsRow.from_tds_frame("frame", self.__base_frame)
+        for agg in self.__aggregations:
+            map_result = agg.get_map_fn()(tds_row)
+            collection = create_primitive_collection(map_result)
+            agg_result = agg.get_aggregate_fn()(collection)
+            new_columns.append(tds_column_for_primitive(agg.get_name(), agg_result))
+
+        return new_columns
+
+    def validate(self) -> bool:
+        base_columns = self.__base_frame.columns()
+        for c in self.__grouping_columns:
+            found_col = False
+            for base_col in base_columns:
+                if base_col.get_name() == c:
+                    found_col = True
+                    break
+            if not found_col:
+                raise ValueError(
+                    f"Column - '{c}' in group by columns list doesn't exist in the current frame. "
+                    f"Current frame columns: {[x.get_name() for x in base_columns]}"
+                )
+
+        agg_cols = [c.get_name() for c in self.__aggregations]
+        new_cols = self.__grouping_columns + agg_cols
+
+        if len(new_cols) == 0:
+            raise ValueError("At-least one grouping column or aggregate specification must be provided "
+                             "when using group_by function")
+
+        if len(new_cols) != len(set(new_cols)):
+            raise ValueError("Found duplicate column names in grouping columns and aggregation columns. "
+                             f"Grouping columns - {self.__grouping_columns}, Aggregation columns - {agg_cols}")
+
+        tds_row = LegacyApiTdsRow.from_tds_frame("frame", self.__base_frame)
+        index = 0
+        for agg in self.__aggregations:
+            map_fn_copy = agg.get_map_fn()  # For MyPy
+            if not isinstance(map_fn_copy, type(lambda x: 0)) or (map_fn_copy.__code__.co_argcount != 1):
+                raise TypeError(
+                    f"AggregateSpecification at index {index} (0-indexed) incompatible. "
+                    "Map function should be a lambda which takes one argument (TDSRow)"
+                )
+            try:
+                map_result = agg.get_map_fn()(tds_row)
+            except Exception as e:
+                raise RuntimeError(
+                    f"AggregateSpecification at index {index} (0-indexed) incompatible. "
+                    f"Error occurred while evaluating map function. Message: {str(e)}"
+                ) from e
+
+            if not isinstance(map_result, (int, float, bool, str, date, datetime, PyLegendPrimitive)):
+                raise ValueError(
+                    f"AggregateSpecification at index {index} (0-indexed) incompatible. "
+                    f"Map function returns non-primitive - {str(type(map_result))}"
+                )
+
+            collection = create_primitive_collection(map_result)
+
+            agg_fn_copy = agg.get_aggregate_fn()  # For MyPy
+            if not isinstance(agg_fn_copy, type(lambda x: 0)) or (agg_fn_copy.__code__.co_argcount != 1):
+                raise TypeError(
+                    f"AggregateSpecification at index {index} (0-indexed) incompatible. "
+                    "Aggregate function should be a lambda which takes one argument (primitive collection)"
+                )
+            try:
+                agg_result = agg.get_aggregate_fn()(collection)
+            except Exception as e:
+                raise RuntimeError(
+                    f"AggregateSpecification at index {index} (0-indexed) incompatible. "
+                    f"Error occurred while evaluating aggregate function. Message: {str(e)}"
+                ) from e
+
+            if not isinstance(agg_result, PyLegendPrimitive):
+                raise ValueError(
+                    f"AggregateSpecification at index {index} (0-indexed) incompatible. "
+                    f"Aggregate function returns non-primitive - {str(type(agg_result))}"
+                )
+
+            index += 1
+
+        return True
